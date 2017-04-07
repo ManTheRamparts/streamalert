@@ -19,6 +19,10 @@ import os
 
 from collections import OrderedDict
 
+import boto3
+
+from botocore.exceptions import ClientError
+
 from stream_alert_cli.logger import LOGGER_CLI
 
 OUTPUTS_CONFIG = 'outputs.json'
@@ -70,6 +74,68 @@ def load_config(props, service):
         return False
 
     return config
+
+def encrypt_and_push_creds_to_s3(region, bucket, key, props):
+    """Construct a dictionary of the credentials we want to encrypt and send to s3
+
+    Args:
+        region [string]: The aws region to use for boto3 client
+        bucket [string]: The name of the s3 bucket to write the encrypted credentials to
+        key [string]: ID for the s3 object to write the encrypted credentials to
+        props [OrderedDict]: Contains various OutputProperty items
+    """
+    creds = {name: prop.value
+             for (name, prop) in props.iteritems() if prop.cred_requirement}
+
+    # Check if we have any creds to send to s3
+    # Some services (ie: AWS) do not require this, so it's not an error
+    if not creds:
+        return
+
+    creds_json = json.dumps(creds)
+    enc_creds = kms_encrypt(region, creds_json)
+    send_creds_to_s3(region, bucket, key, enc_creds)
+
+def kms_encrypt(region, data):
+    """Encrypt data with AWS KMS.
+
+    Args:
+        region [string]: AWS region to use for boto3 client
+        data [string]: json string to be encrypted
+
+    Returns:
+        [string] Encrypted ciphertext data blob
+    """
+    try:
+        client = boto3.client('kms', region_name=region)
+        response = client.encrypt(KeyId='alias/stream_alert_secrets',
+                                  Plaintext=data)
+        return response['CiphertextBlob']
+    except ClientError as err:
+        LOGGER_CLI.error('an error occurred during credential encryption: %s', err.response)
+        raise err
+
+def send_creds_to_s3(region, bucket, key, blob_data):
+    """Put the encrypted credential blob for this service and destination in s3
+
+    Args:
+        region [string]: AWS region to use for boto3 client
+        bucket [string]: The name of the s3 bucket to write the encrypted credentials to
+        key [string]: ID for the s3 object to write the encrypted credentials to
+        blob_data [bytes]: Cipher text blob from the kms encryption
+    """
+    try:
+        client = boto3.client('s3', region_name=region)
+        client.put_object(
+            Body=blob_data,
+            Bucket=bucket,
+            Key=key
+        )
+    except ClientError as err:
+        LOGGER_CLI.error('an error occurred while sending credentials for key []%s] to S3: %s',
+                         key,
+                         err.response)
+        raise err
 
 def check_output_exists(config, props, service):
     """Determine if this service and destination combo has already been created
