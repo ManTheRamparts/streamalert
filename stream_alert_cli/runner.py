@@ -393,9 +393,9 @@ def user_input(requested_info, mask):
         while not response:
             response = raw_input(prompt)
 
-        # Restrict having spaces in items (applies to things like descriptors, etc)
-        if ' ' in response:
-            LOGGER_CLI.error('the supplied input should not contain any spaces')
+        # Restrict having spaces or colons in items (applies to things like descriptors, etc)
+        if any(x in [' ', ':'] for x in response):
+            LOGGER_CLI.error('the supplied input should not contain any space or colon characters')
             return user_input(requested_info, mask)
     else:
         while not response:
