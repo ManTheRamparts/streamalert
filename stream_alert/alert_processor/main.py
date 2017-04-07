@@ -86,8 +86,13 @@ def run(message, context):
     outputs = alert['metadata']['outputs']
     # Get the output configuration for this rule and send the alert to each
     for output in set(outputs):
-        output_info = output.split(':')
-        service, descriptor = output_info[0], output_info[1] if len(output_info) > 1 else ""
+        try:
+            service, descriptor = output.split(':')
+        except ValueError as err:
+            LOGGER.error('outputs for rules must be declared with both a service and a '
+                         'descriptor for the integration (ie: \'slack:my_channel\')')
+            raise err
+
         region = context.invoked_function_arn.split(':')[3]
         function = context.invoked_function_arn.split(':')[-1]
 
