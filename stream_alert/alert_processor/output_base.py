@@ -59,11 +59,11 @@ class StreamOutputBase(object):
     """
     __metaclass__ = ABCMeta
     __service__ = NotImplemented
-    __config_service__ = __service__
 
-    def __init__(self, region, s3_prefix):
+    def __init__(self, region, function_name, config):
         self.region = region
-        self.s3_prefix = self._format_prefix(s3_prefix)
+        self.secrets_bucket = self._get_secrets_bucket_name(function_name)
+        self.config = config
 
     @staticmethod
     def _local_temp_dir():
@@ -102,7 +102,8 @@ class StreamOutputBase(object):
             if not self._get_creds_from_s3(local_cred_location, descriptor):
                 return
 
-        with open(local_cred_location, 'wb') as cred_file:
+        # Open encrypted credential file
+        with open(local_cred_location, 'rb') as cred_file:
             enc_creds = cred_file.read()
 
         # Get the decrypted credential json from kms and load into dict
@@ -120,16 +121,10 @@ class StreamOutputBase(object):
 
         return creds_dict
 
-    def _format_s3_bucket(self, suffix):
-        """Format the s3 bucket by combining the stored qualifier with a suffix
-
-        Args:
-            suffix [string]: Suffix for an s3 bucket
-
-        Returns:
-            [string] The combined prefix and suffix
-        """
-        return '.'.join([self.s3_prefix, suffix])
+    def _get_secrets_bucket_name(self, function_name):
+        """Returns the streamalerts secrets s3 bucket name"""
+        prefix = function_name.split('_')[0]
+        return '.'.join([prefix, 'streamalert', 'secrets'])
 
     def _get_creds_from_s3(self, cred_location, descriptor):
         """Pull the encrypted credential blob for this service and destination from s3
@@ -144,7 +139,7 @@ class StreamOutputBase(object):
         try:
             client = boto3.client('s3', region_name=self.region)
             with open(cred_location, 'wb') as cred_output:
-                client.download_fileobj(self.get_secrets_bucket_name(),
+                client.download_fileobj(self.secrets_bucket,
                                         self.output_cred_name(descriptor),
                                         cred_output)
 
@@ -195,7 +190,7 @@ class StreamOutputBase(object):
         return s3_prefix.replace('_', '.')
 
     @staticmethod
-    def _request_helper(url, data, headers=None, verify=True):
+    def _request_helper(url, data, headers={}, verify=True):
         """URL request helper to send a payload to an endpoint
 
         Args:
@@ -242,10 +237,6 @@ class StreamOutputBase(object):
         """
         pass
 
-    def get_secrets_bucket_name(self):
-        """Returns the streamalerts secrets s3 bucket name"""
-        return self._format_s3_bucket('streamalert.secrets')
-
     def output_cred_name(self, descriptor):
         """Formats the output name for this credential by combining the service
         and the descriptor.
@@ -264,17 +255,6 @@ class StreamOutputBase(object):
 
         return cred_name
 
-    def get_config_service(self):
-        """Get the string used for saving this service to the config. AWS services
-        are not named the same in the config as they are in the rules processor, so
-        having the ability to return a string like 'aws-s3' instead of 's3' is required
-
-        Returns:
-            [string] Service string used for looking up info in output configuration
-        """
-        return (self.__config_service__,
-                self.__service__)[self.__config_service__ == NotImplemented]
-
     def format_output_config(self, config, props):
         """Add this descriptor to the list of descriptor this service
            If the service doesn't exist, a new entry is added to an empty list
@@ -285,7 +265,7 @@ class StreamOutputBase(object):
         Returns:
             [list<string>] List of descriptors for this service
         """
-        return config.get(self.get_config_service(), []) + [props['descriptor'].value]
+        return config.get(self.__service__, []) + [props['descriptor'].value]
 
     @abstractmethod
     def get_user_defined_properties(self):

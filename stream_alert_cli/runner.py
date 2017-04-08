@@ -388,7 +388,7 @@ def user_input(requested_info, mask):
             response = raw_input(prompt)
 
         # Restrict having spaces or colons in items (applies to things like descriptors, etc)
-        if any(x in [' ', ':'] for x in response):
+        if any(x in [' '] for x in response):
             LOGGER_CLI.error('the supplied input should not contain any space or colon characters')
             return user_input(requested_info, mask)
     else:
@@ -407,7 +407,7 @@ def configure_output(options):
     prefix = CONFIG['account']['prefix']
 
     # Retrieve the proper service class to handle dispatching the alerts of this services
-    output = get_output_dispatcher(options.service, region, prefix)
+    output = get_output_dispatcher(options.service, region, prefix, config_outputs.load_outputs_config())
 
     # If an output for this service has not been defined, the error is logged prior to this
     if not output:
@@ -419,14 +419,14 @@ def configure_output(options):
     for name, prop in props.iteritems():
         props[name] = prop._replace(value=user_input(prop.description, prop.mask_input))
 
-    service = output.get_config_service()
+    service = output.__service__
     config = config_outputs.load_config(props, service)
     # An empty config here means this configuration already exists,
     # so we can ask for user input again for a unique configuration
     if config is False:
         return configure_output(options)
 
-    secrets_bucket = output.get_secrets_bucket_name()
+    secrets_bucket = '{}.streamalert.secrets'.format(prefix)
     secrets_key = output.output_cred_name(props['descriptor'].value)
 
     # Encrypt the creds and push them to S3

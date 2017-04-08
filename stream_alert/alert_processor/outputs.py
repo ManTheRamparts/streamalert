@@ -24,6 +24,8 @@ from datetime import datetime
 
 import boto3
 
+from botocore.exceptions import ClientError
+
 from stream_alert.alert_processor.output_base import StreamOutputBase, OutputProperty
 
 logging.basicConfig()
@@ -35,12 +37,10 @@ def output(cls):
     """Class decorator to register all stream outputs"""
     STREAM_OUTPUTS[cls.__service__] = cls
 
-def get_output_dispatcher(service, region, s3_prefix):
+def get_output_dispatcher(service, region, function_name, config):
     """Returns the subclass that should handle this particular service"""
     try:
-        if service[:3] == 'aws':
-            service = service.split('-')[-1]
-        return STREAM_OUTPUTS[service](region, s3_prefix)
+        return STREAM_OUTPUTS[service](region, function_name, config)
     except KeyError:
         LOGGER.error('designated output service [%s] does not exist', service)
 
@@ -231,7 +231,7 @@ class SlackOutput(StreamOutputBase):
         """
         return OrderedDict([
             ('descriptor',
-             OutputProperty(description='a short and unique descriptor for this Slack integration'
+             OutputProperty(description='a short and unique descriptor for this Slack integration '
                                         '(ie: channel, group, etc)')),
             ('url',
              OutputProperty(description='the full Slack webhook url, including the secret',
@@ -270,7 +270,7 @@ class AWSOutput(StreamOutputBase):
             service_config [dict]: The actual outputs config that has been read in
             values [OrderedDict]: Contains all the OutputProperty items for this service
         """
-        return dict(service_config.get(self.__config_service__, {}),
+        return dict(service_config.get(self.__service__, {}),
                     **{values['descriptor'].value: values['arn'].value})
 
     @abstractmethod
@@ -282,8 +282,7 @@ class AWSOutput(StreamOutputBase):
 @output
 class S3Output(AWSOutput):
     """S3Output handles all alert dispatching for AWS S3"""
-    __service__ = 's3'
-    __config_service__ = 'aws-s3'
+    __service__ = 'aws-s3'
 
     def get_user_defined_properties(self):
         """Get properties that must be asssigned by the user when configuring a new S3
@@ -327,10 +326,10 @@ class S3Output(AWSOutput):
         current_date = datetime.now()
         alert_string = json.dumps(alert)
 
-        client = boto3.client(self.__service__, region_name=self.region)
+        client = boto3.client('s3', region_name=self.region)
         resp = client.put_object(
             Body=alert_string,
-            Bucket=self._format_s3_bucket('streamalerts'),
+            Bucket=self.config[self.__service__][kwargs['descriptor']],
             Key='{}/{}/{}/dt={}/streamalerts_{}.json'.format(
                 service,
                 entity,
