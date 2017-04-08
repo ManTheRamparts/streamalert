@@ -112,7 +112,7 @@ resource "aws_iam_role_policy" "streamalert_alert_processor_s3" {
       ],
       "Effect": "Allow",
       "Resource": [
-        "${aws_s3_bucket.stream_alerts_secrets.arn}/*"
+        "arn:aws:s3:::${var.prefix}.streamalert.secrets/*"
       ]
     }
   ]
